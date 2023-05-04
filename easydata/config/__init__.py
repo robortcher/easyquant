@@ -1,0 +1,1 @@
+"""database config class and frequently used url"""
