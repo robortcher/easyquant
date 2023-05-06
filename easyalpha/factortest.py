@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from functools import partial
 import time
 from multiprocessing import cpu_count
+import numpy as np
 
 
 __date_col__, __symbol_col__ = 'date', 'code'
@@ -26,11 +27,14 @@ class FactorTesting():
             from easyprocessor.nmprocessor import bar_resample
             self.factor_data = bar_resample(self.factor_data,frequency=self.freq,symbol_level=__symbol_col__)
             self.price_data = bar_resample(self.price_data,frequency=self.freq,symbol_level=__symbol_col__)
+        if isinstance(self.factor_data,pd.Series):
+            self.factor_data = pd.DataFrame(self.factor_data)
         
         assert self.price_data is not None or self.price_api is not None, "you must input at least one of price_data or price_api"
         self.date_period = sorted(list(set(self.factor_data.index.get_level_values(__date_col__))))
         self.early_start = self.__get_early_start__()
         self.last_end = self.__get_last_end__()
+        self.factor_data = self.factor_data.groupby(level=__symbol_col__).apply(lambda x:x.droplevel(__symbol_col__).reindex(self.date_period)).swaplevel(0,1)
         if self.price_data is None:
             self.price_data = self.price_api(start=self.early_start,end_date=self.last_end)
             print("debug code......")    
@@ -43,6 +47,9 @@ class FactorTesting():
         """根据factor_data获取最终日期"""
         return max(self.date_period)
 
+
+    # def __all_date_range__(self):
+    #     return sorted(list(set(self.factor_data.index.get_level_values(__date_col__))))
 
     def calculate_forward_return(
         self,
@@ -61,7 +68,10 @@ class FactorTesting():
         #     return_data = (self.price_data[_c].unstack() / self.price_data[_o].unstack() - 1)
         # elif format_base.__len__()==1:
         #     return_data  = self.price_data[base].unstack().pct_change()
-        daily_return = self.price_data[base].unstack().sort_index().pct_change().stack()
+        # daily_return = self.price_data[base].unstack().sort_index().pct_change().stack()
+        daily_return = self.price_data.sort_index()[base].groupby(level=__symbol_col__).apply(lambda x:x.pct_change())
+        # daily_return = self.price_data[base].groupby(level=__symbol_col__).apply(lambda x:x.shift(-forward_period)/x-1)
+        
         if universe is not None:
             daily_return = daily_return[universe.reindex(daily_return.index)>0]
 
@@ -77,31 +87,15 @@ class FactorTesting():
             cs_cap = CsCapweighted(weight_data=benchmark_weights) # 构造加权处理器
             benchmark_return = cs_cap(daily_return) # 将时序数据在截面上扩充
             benchmark_return_tcs = _add_ts_data(tcs_data=daily_return, ts_data=benchmark_return,merge=False)
-            daily_return = daily_return - benchmark_return_tcs
+            daily_return = daily_return - benchmark_return_tcs.iloc[:,0]
         
-# ##########
-
-            
-#             if forward_period == 0: # 0 期收益指定为0 
-#                 return daily_return
-
-#             elif forward_period>0:
-#                 if cumulative:
-#                     return_data= (price.shift(-forward_period) / price - 1).shift(-add_shift)
-#                 else:
-#                     return_data= (price.shift(-forward_period) / price.shift(-forward_period+1) - 1).shift(-add_shift)
-#             else:
-#                 if cumulative:
-#                     return_data= (price / price.shift(-forward_period) - 1).shift(-add_shift)
-#                 else:
-#                     return_data= (price.shift(-forward_period-1) / price.shift(-forward_period) - 1).shift(-add_shift)
-# #########
 
         if cumulative:
-            return_data  = daily_return.unstack().rolling(forward_period).sum().shift(-forward_period)
+            # return_data  = daily_return.unstack().rolling(forward_period).sum().shift(-forward_period)
+            return_data = daily_return.groupby(level=__symbol_col__).apply(lambda x:x.rolling(forward_period).sum().shift(-forward_period))
         else:
-            return_data  = daily_return.unstack().shift(-forward_period)
-        return_data = return_data.stack()
+            return_data  = daily_return.groupby(level=__symbol_col__).apply(lambda x:x.shift(-forward_period))
+        # return_data = return_data.stack()
         return return_data
 
     
@@ -154,17 +148,24 @@ class FactorTesting():
 
 
 
-    def get_quantile_factor(self,groups:int=10,lag:int=1,universe:pd.Series|None=None):
+    def get_quantile_factor(self,groups:int=10,lag:int=1,universe:pd.Series|None=None,holding_period:int=1):
         """获取factor的quantile"""
         
         from easyprocessor.csprocessor import Csqcut
+        assert lag>=0, 'please input a positive int of lag'
         cs_qcut = Csqcut(q=groups)
         if universe is not None:
-            shift_factor = self.factor_data[universe.reindex(self.factor_data.index)>0].groupby(level=__symbol_col__).apply(lambda x:x.shift(lag))
+            shift_factor = self.factor_data[universe.reindex(self.factor_data.index)>0].groupby(level=__symbol_col__).apply(lambda x:x.shift(lag).ioc[lag:])
         else:
-            shift_factor = self.factor_data.groupby(level=__symbol_col__).apply(lambda x:x.shift(lag))
+            shift_factor = self.factor_data.groupby(level=__symbol_col__).apply(lambda x:x.shift(lag).iloc[lag:])
         # shift
-        return cs_qcut(shift_factor)
+        if shift_factor.index[0].__len__()==3:
+            shift_factor = shift_factor.droplevel(0)
+        quantile_data = cs_qcut(shift_factor).astype(np.float)
+        if holding_period >1 :
+            quantile_data = quantile_data.fillna(-1).groupby(level=__symbol_col__).apply(lambda x:x[::holding_period].reindex(x.index).ffill()) 
+            quantile_data = quantile_data.replace(-1,np.nan)
+        return quantile_data
     
 
     def get_factor_group_return(
@@ -176,16 +177,19 @@ class FactorTesting():
             base:str='close',
             cumulative:bool=True,
             excess_return:bool=False,
-            benchmark_weights:pd.Series|None=None
+            benchmark_weights:pd.Series|None=None,
+            holding_period:int=1 
         ):
         """获取不同分组的因子收益"""
-        quantile_factor = self.get_quantile_factor(groups=groups,lag=lag,universe=universe)
+        quantile_factor = self.get_quantile_factor(groups=groups,lag=lag,universe=universe,holding_period=holding_period)
         return_data = self.calculate_forward_return(base=base,forward_period=forward_period,benchmark_weights=benchmark_weights,cumulative=cumulative,excess_return=excess_return)
         factor_group_return = quantile_factor.apply(lambda x:return_data.groupby(x).apply(lambda x:x.groupby(level=__date_col__).mean()))
         # factor_turnover = self.get_quantile_turnover(quantile_data=quantile_factor)
         quantile_turnover = quantile_factor.apply(get_quantile_turnover)
         return factor_group_return, quantile_turnover
     
+
+
 def get_quantile_turnover(quantile_data:pd.Series):
     """根据quantile group计算换手"""
     default_weight = pd.Series(1,index=quantile_data.index)

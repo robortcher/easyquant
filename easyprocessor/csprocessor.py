@@ -70,10 +70,10 @@ class Csqcut():
 
     def func(self,data:pd.DataFrame|pd.Series):
         if isinstance(data,pd.DataFrame):
-            return data.apply(lambda x:x.dropna().groupby(level=__date_col__).apply(lambda x:pd.qcut(x.rank(method='first'),self.q,labels=self.labels)))
+            res = data.apply(lambda x:x.dropna().groupby(level=__date_col__).apply(lambda x:pd.qcut(x.rank(method='first'),self.q,labels=self.labels)))
         elif isinstance(data,pd.Series):
-            return data.dropna().groupby(level=__date_col__).apply(lambda x:pd.qcut(x.rank(method='first'),self.q,labels=self.labels))
-
+            res = data.dropna().groupby(level=__date_col__).apply(lambda x:pd.qcut(x.rank(method='first'),self.q,labels=self.labels))
+        return res.reindex(data.index)
 class CsCorr():
     """截面相关系数"""
     def __init__(self,method='normal'):
