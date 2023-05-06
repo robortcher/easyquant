@@ -6,3 +6,4 @@ a integrated package for backtesing、factor analysis
     -   2023.5.6修改
         -   FactorTest初始化新增factor_data的日期对齐操作
         -   easyalpha.factortesing模块新增holding period参数
+        -   修改目录结构
