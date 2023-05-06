@@ -1,4 +1,4 @@
-# welcome to easy quant
+# welcome to easyquant
 a integrated package for backtesing、factor analysis 
 
 ## realeased
