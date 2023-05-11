@@ -74,6 +74,7 @@ class Csqcut():
         elif isinstance(data,pd.Series):
             res = data.dropna().groupby(level=__date_col__).apply(lambda x:pd.qcut(x.rank(method='first'),self.q,labels=self.labels))
         return res.reindex(data.index)
+
 class CsCorr():
     """截面相关系数"""
     def __init__(self,method='normal'):
@@ -128,7 +129,7 @@ class CsNeutrualize(CsProcessor):
     def __call__(self, df,**kwargs):
         return self.func(data=df,**kwargs)
     
-    def func(self,data,**kwargs):
+    def func(self,data:pd.DataFrame,**kwargs):
 
         
         # 时间戳判断和处理
@@ -152,11 +153,12 @@ class CsNeutrualize(CsProcessor):
                 explain_data = _add_cs_data(explain_data,pd.get_dummies(Ind_info))
                 explain_data.index = explain_data.index.set_names([__date_col__,__symbol_col__])
             self.explain_data = explain_data
+        def __func__(data):
+            XY_data = pd.concat([data,explain_data],axis=1)
+            resid_data = XY_data.groupby(level=__date_col__).apply(lambda x:get_beta(x,value='resid'))
+            return resid_data
 
-
-        XY_data = pd.concat([data,explain_data],axis=1)
-        resid_data = XY_data.groupby(level=__date_col__).apply(lambda x:get_beta(x,value='resid'))
-        return resid_data
+        return data.apply(__func__)
 
 class CsWinzorize(CsProcessor):
     """截面极值处理"""
