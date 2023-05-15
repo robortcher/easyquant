@@ -25,7 +25,8 @@ class FactorTesting():
     price_data:pd.DataFrame=None
     price_api:Callable|None=None
     freq:str|int=1
-    
+    start_date:str|None=None
+    end_date:str|None=None
     def __post_init__(self):
         # if  self.freq is not None:
         #     from ..easyprocessor.nmprocessor import bar_resample
@@ -33,7 +34,11 @@ class FactorTesting():
         #     self.price_data = bar_resample(self.price_data,frequency=self.freq,symbol_level=__symbol_col__)
         if isinstance(self.factor_data,pd.Series):
             self.factor_data = pd.DataFrame(self.factor_data)
-        
+        if self.start_date is not None:
+            self.factor_data = self.factor_data[self.factor_data.index.get_level_values(__date_col__)>=self.start_date]
+        if self.end_date is not None:
+            self.factor_data = self.factor_data[self.factor_data.index.get_level_values(__date_col__)<=self.end_date]
+
         assert self.price_data is not None or self.price_api is not None, "you must input at least one of price_data or price_api"
         self.date_period = sorted(list(set(self.factor_data.index.get_level_values(__date_col__))))
         self.early_start = self.__get_early_start__()
@@ -43,7 +48,9 @@ class FactorTesting():
         if self.price_data is None:
             self.price_data = self.price_api(start=self.early_start,end_date=self.last_end)
             print("debug code......")    
-    
+        self.price_data = self.price_data[(self.price_data.index.get_level_values(0)>=self.early_start) & (self.price_data.index.get_level_values(__date_col__)<=self.last_end)]
+        
+
     def __get_early_start__(self):
         """根据factor_data获取最早日期"""
         return min(self.date_period)
@@ -236,7 +243,8 @@ class FactorTesting():
                 excess_return=excess_return,
                 benchmark_weights=benchmark_weights,
                 cumulative=cumulative,
-                factor_list=factor_list
+                factor_list=factor_list,
+                base=base
             )
             universe_name = universe if hasattr(universe,'name') else universe
             describe = f'|{self.early_start}~{self.last_end}|groups:{groups}|is_excess:{excess_return}|unverse:{universe_name}'

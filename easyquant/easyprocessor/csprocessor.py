@@ -83,8 +83,8 @@ class CsCorr():
     def __call__(self,X,y):
         return self.func(X,y)
 
-    def func(self,X:pd.DataFrame,y:pd.Series):
-        
+    def _func(self,X:pd.DataFrame,y:pd.Series):
+        """根据公式"""
         if self.method == 'rank':
             X = X.groupby(level=__date_col__).rank()
             y = y.groupby(level=__date_col__).rank()
@@ -99,6 +99,24 @@ class CsCorr():
         stddev_Y = y.groupby(level=__date_col__).std()
         corrXY = (E_XY - EX.apply(lambda x:x* EY)) / (stddev_X.apply(lambda x:x*stddev_Y))
         return corrXY
+    
+    def func(self,x, y):
+        """pandas 内置函数"""
+        if type(x.index) is not pd.MultiIndex:
+            x = x.stack()
+        if type(y.index) is not pd.MultiIndex:
+            y = y.stack()
+        xy = pd.DataFrame(x)
+        xy['y'] = y
+        xy = xy.dropna()
+        if self.method == 'normal':
+            xy_corr = xy.groupby(level='date').apply(lambda x:x.iloc[:,:-1].corrwith(x['y']))
+        elif self.method == 'rank':
+            xy_corr = xy.groupby(level='date').apply(lambda x:x.iloc[:,:-1].rank().corrwith(x['y'].rank()))
+        return xy_corr
+
+
+
 
 class CsCapweighted():
     """截面加权处理函数"""
